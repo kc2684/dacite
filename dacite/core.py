@@ -1,3 +1,4 @@
+import contextlib
 import copy
 from dataclasses import is_dataclass
 from itertools import zip_longest
@@ -49,8 +50,7 @@ def from_dict(data_class: Type[T], data: Data, config: Optional[Config] = None) 
         raise ForwardReferenceError(str(error))
     data_class_fields = get_fields(data_class)
     if config.strict:
-        extra_fields = set(data.keys()) - {f.name for f in data_class_fields}
-        if extra_fields:
+        if extra_fields := set(data.keys()) - {f.name for f in data_class_fields}:
             raise UnexpectedDataError(keys=extra_fields)
     for field in data_class_fields:
         field = copy.copy(field)
@@ -65,7 +65,8 @@ def from_dict(data_class: Type[T], data: Data, config: Optional[Config] = None) 
             except DaciteFieldError as error:
                 error.update_path(field.name)
                 raise
-            if config.check_types and not is_instance(value, field.type):
+            if config.check_types and not is_instance(value, field.type) and\
+                    (config.check_types != 2 or value is not None):
                 raise WrongTypeError(field_path=field.name, field_type=field.type, value=value)
         else:
             try:
@@ -106,7 +107,7 @@ def _build_value_for_union(union: Type, data: Any, config: Config) -> Any:
         return _build_value(type_=types[0], data=data, config=config)
     union_matches = {}
     for inner_type in types:
-        try:
+        with contextlib.suppress(DaciteError):
             # noinspection PyBroadException
             try:
                 data = transform_value(
@@ -120,8 +121,6 @@ def _build_value_for_union(union: Type, data: Any, config: Config) -> Any:
                     union_matches[inner_type] = value
                 else:
                     return value
-        except DaciteError:
-            pass
     if config.strict_unions_match:
         if len(union_matches) > 1:
             raise StrictUnionMatchError(union_matches)
